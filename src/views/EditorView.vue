@@ -4,79 +4,118 @@ import { marked } from 'marked'
 import { sharedData } from '../store'
 import 'github-markdown-css/github-markdown.css'
 
-// URL de tu backend en Railway
 const BASE_URL = "https://backend-md-production.up.railway.app"
 const isSaving = ref(false)
+const fileList = ref([])
+const currentFileName = ref("")
+const newFileTitle = ref("")
 
-// Configuración de marked para mejor renderizado
-marked.setOptions({
-    breaks: true, // Respeta los saltos de línea simples
-    gfm: true     // GitHub Flavored Markdown
-})
+marked.setOptions({ breaks: true, gfm: true })
 
-// 1. FUNCIÓN PARA CARGAR EL TEXTO AUTOMÁTICAMENTE
-const loadMarkdown = async () => {
+const fetchFiles = async () => {
     try {
-        const response = await fetch(BASE_URL)
-        if (response.ok) {
-            sharedData.value = await response.text()
-        }
-    } catch (error) {
-        console.error("Error al conectar con Railway:", error)
-    }
+        const response = await fetch(`${BASE_URL}/api/files`)
+        if (response.ok) fileList.value = await response.json()
+    } catch (error) { console.error("Error lista:", error) }
 }
 
-// 2. FUNCIÓN PARA GUARDAR LOS CAMBIOS
-const saveMarkdown = async () => {
-    if (!sharedData.value) return
-
+const createNewFile = async () => {
+    if (!newFileTitle.value || !sharedData.value) return alert("Escribe título y contenido")
     isSaving.value = true
     try {
-        const response = await fetch(`${BASE_URL}/api/md`, {
+        const response = await fetch(`${BASE_URL}/api/files`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newFileTitle.value, content: sharedData.value })
+        })
+        if (response.ok) {
+            const result = await response.json()
+            currentFileName.value = result.fileName
+            newFileTitle.value = ""
+            await fetchFiles()
+            alert("¡Archivo creado!")
+        }
+    } catch (e) { alert("Error al crear") }
+    finally { isSaving.value = false }
+}
+
+const loadFile = async (name) => {
+    try {
+        const response = await fetch(`${BASE_URL}/api/files/${name}`)
+        if (response.ok) {
+            sharedData.value = await response.text()
+            currentFileName.value = name
+        }
+    } catch (e) { console.error("Error al cargar") }
+}
+
+const updateFile = async () => {
+    if (!currentFileName.value) return
+    isSaving.value = true
+    try {
+        await fetch(`${BASE_URL}/api/files/${currentFileName.value}`, {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content: sharedData.value })
         })
-
-        if (response.ok) {
-            alert("¡Cambios guardados en el servidor!")
-        } else {
-            alert("Error al guardar en el servidor")
-        }
-    } catch (error) {
-        console.error("Error de red:", error)
-        alert("No se pudo conectar para guardar")
-    } finally {
-        isSaving.value = false
-    }
+        alert("¡Guardado!")
+    } catch (e) { alert("Error al actualizar") }
+    finally { isSaving.value = false }
 }
 
-onMounted(loadMarkdown)
+const deleteFile = async (name) => {
+    if (!confirm(`¿Borrar ${name}?`)) return
+    try {
+        const response = await fetch(`${BASE_URL}/api/files/${name}`, { method: 'DELETE' })
+        if (response.ok) {
+            if (currentFileName.value === name) {
+                sharedData.value = ""; currentFileName.value = ""
+            }
+            await fetchFiles()
+        }
+    } catch (e) { alert("Error al borrar") }
+}
 
-// Renderizador del Markdown
-const output = computed(() => {
-    return marked.parse(sharedData.value || '')
-})
+const resetEditor = () => {
+    currentFileName.value = ""; sharedData.value = ""; newFileTitle.value = ""
+}
+
+onMounted(fetchFiles)
+const output = computed(() => marked.parse(sharedData.value || ''))
 </script>
 
 <template>
     <div class="nav">
-        <div class="links">
-            <router-link to="/full" class="link">👁 Ver Pantalla Completa</router-link>
+        <div class="left-nav">
+            <button @click="resetEditor" class="btn-new">📄 Nuevo</button>
+            <div class="file-info" v-if="currentFileName">
+                Editando: <span>{{ currentFileName }}</span>
+            </div>
         </div>
         <div class="actions">
-            <button @click="saveMarkdown" :disabled="isSaving" class="btn-save">
-                {{ isSaving ? 'Guardando...' : '💾 Guardar Cambios' }}
+            <template v-if="!currentFileName">
+                <input v-model="newFileTitle" placeholder="Título..." class="title-input" />
+                <button @click="createNewFile" class="btn-create">➕ Crear</button>
+            </template>
+            <button v-else @click="updateFile" :disabled="isSaving" class="btn-save">
+                {{ isSaving ? 'Guardando...' : '💾 Guardar' }}
             </button>
         </div>
     </div>
 
     <div class="editor-layout">
-        <!-- Columna Izquierda: Editor -->
-        <textarea v-model="sharedData" class="input-area" spellcheck="false"
-            placeholder="Escribe aquí tu contenido..."></textarea>
+        <div class="sidebar">
+            <h3>Documentos</h3>
+            <ul>
+                <li v-for="file in fileList" :key="file" :class="{ active: currentFileName === file }">
+                    <span class="file-name" @click="loadFile(file)">{{ file }}</span>
+                    <button class="btn-delete" @click.stop="deleteFile(file)">🗑️</button>
+                </li>
+            </ul>
+        </div>
 
-        <!-- Columna Derecha: Previsualización Forzada a Tema Claro -->
+        <textarea v-model="sharedData" class="input-area" spellcheck="false" placeholder="# Escribe aquí..."></textarea>
+
         <div class="preview-container">
             <div class="markdown-body" v-html="output"></div>
         </div>
@@ -84,8 +123,9 @@ const output = computed(() => {
 </template>
 
 <style scoped>
+/* NAV Y SIDEBAR */
 .nav {
-    padding: 10px 20px;
+    padding: 0 20px;
     background: #24292e;
     color: white;
     display: flex;
@@ -94,31 +134,89 @@ const output = computed(() => {
     height: 55px;
 }
 
-.link {
+.left-nav {
+    display: flex;
+    align-items: center;
+}
+
+.btn-new {
+    background: transparent;
     color: #58a6ff;
-    text-decoration: none;
-    font-weight: bold;
+    border: 1px solid #58a6ff;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 15px;
+}
+
+.sidebar {
+    width: 220px;
+    background: #f6f8fa;
+    border-right: 1px solid #d0d7de;
+    overflow-y: auto;
+}
+
+.sidebar h3 {
+    padding: 15px;
+    font-size: 13px;
+    color: #57606a;
+    margin: 0;
+    text-transform: uppercase;
+}
+
+.sidebar li {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 15px;
+    font-size: 12px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+
+.sidebar li.active {
+    background: #0969da;
+    color: white;
+}
+
+.btn-delete {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    opacity: 0.6;
+}
+
+.btn-delete:hover {
+    opacity: 1;
+}
+
+.title-input {
+    background: #1f2328;
+    border: 1px solid #444;
+    color: white;
+    padding: 6px;
+    border-radius: 4px;
+    margin-right: 10px;
+}
+
+.btn-create {
+    background: #0969da;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 6px;
+    cursor: pointer;
 }
 
 .btn-save {
-    background-color: #238636;
+    background: #238636;
     color: white;
     border: none;
-    padding: 8px 16px;
+    padding: 8px 15px;
     border-radius: 6px;
     cursor: pointer;
-    font-weight: 500;
 }
 
-.btn-save:hover:not(:disabled) {
-    background-color: #2ea043;
-}
-
-.btn-save:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
+/* EDITOR Y PREVIEW */
 .editor-layout {
     display: flex;
     height: calc(100vh - 55px);
@@ -127,13 +225,11 @@ const output = computed(() => {
 .input-area {
     flex: 1;
     padding: 25px;
-    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-    font-size: 15px;
-    line-height: 1.6;
     border: none;
     border-right: 1px solid #d0d7de;
     resize: none;
     outline: none;
+    font-size: 15px;
     background: #ffffff;
     color: #1f2328;
 }
@@ -143,30 +239,43 @@ const output = computed(() => {
     padding: 30px;
     overflow-y: auto;
     background-color: #ffffff;
-    /* Fondo blanco para la columna */
 }
 
-/* Ajustes de la librería GitHub Markdown */
+/* ESTILOS MARKDOWN (FONDO CLARO, CÓDIGO OSCURO) */
 .markdown-body {
-    box-sizing: border-box;
-    min-width: 200px;
-    max-width: 980px;
-    margin: 0 auto;
     background-color: #ffffff !important;
-    /* Forzamos fondo blanco */
     color: #1f2328 !important;
-    /* Forzamos texto oscuro */
     text-align: left;
+    font-size: 16px;
 }
 
-/* Estilo para cuando compartan clases similares */
+/* Bloques de código (Pre) - Fondo Negro, Letras Blancas */
+:deep(.markdown-body pre) {
+    background-color: #1b1f23 !important;
+    color: #ffffff !important;
+    padding: 16px;
+    border-radius: 8px;
+    overflow: auto;
+}
+
+/* Código en línea (inline code) - Fondo grisáceo suave */
+:deep(.markdown-body code) {
+    background-color: rgba(175, 184, 193, 0.2);
+    color: #1f2328;
+    padding: 0.2em 0.4em;
+    border-radius: 6px;
+    font-family: monospace;
+}
+
+/* Evitar que el código dentro de pre herede el color oscuro de arriba */
+:deep(.markdown-body pre code) {
+    background-color: transparent !important;
+    color: #e6edf3 !important;
+    padding: 0;
+}
+
 :deep(.markdown-body h1),
 :deep(.markdown-body h2) {
-    color: #1f2328;
     border-bottom: 1px solid #d8dee4;
-}
-
-:deep(.markdown-body li) {
-    color: #1f2328;
 }
 </style>

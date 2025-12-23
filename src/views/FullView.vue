@@ -4,23 +4,48 @@ import { marked } from 'marked'
 import { sharedData } from '../store'
 import 'github-markdown-css/github-markdown.css'
 
-// Configuración de marcado para consistencia con el editor
+// Configuración de marcado
 marked.setOptions({
     breaks: true,
     gfm: true
 })
 
 const output = computed(() => marked.parse(sharedData.value || ''))
+
+// Función para descargar el contenido como archivo .md
+const downloadMarkdown = () => {
+    const content = sharedData.value || '';
+    if (!content) return;
+
+    // Crear el blob con el contenido de texto
+    const blob = new Blob([content], { type: 'text/markdown' });
+
+    // Crear un enlace temporal
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    // Configurar nombre del archivo (puedes dinamizarlo si quieres)
+    link.href = url;
+    link.download = `documento-${Date.now()}.md`;
+
+    // Simular clic y limpiar
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
 </script>
 
 <template>
     <div class="page-wrapper">
         <div class="nav">
             <router-link to="/" class="back-link">← Volver al Editor</router-link>
+            <button @click="downloadMarkdown" class="download-btn">
+                Descargar .md
+            </button>
         </div>
 
         <div class="full-container">
-            <!-- Forzamos los estilos de GitHub con colores oscuros legibles -->
             <div class="markdown-body" v-html="output"></div>
         </div>
     </div>
@@ -36,7 +61,9 @@ const output = computed(() => marked.parse(sharedData.value || ''))
     padding: 15px 30px;
     background: #f6f8fa;
     border-bottom: 1px solid #d0d7de;
-    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .back-link {
@@ -45,8 +72,20 @@ const output = computed(() => marked.parse(sharedData.value || ''))
     font-weight: 500;
 }
 
-.back-link:hover {
-    text-decoration: underline;
+.download-btn {
+    background-color: #2da44e;
+    color: white;
+    border: 1px solid rgba(27, 31, 36, 0.15);
+    padding: 5px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.download-btn:hover {
+    background-color: #2c974b;
 }
 
 .full-container {
@@ -55,17 +94,14 @@ const output = computed(() => marked.parse(sharedData.value || ''))
     padding: 40px 20px;
 }
 
-/* Ajustes de la librería GitHub Markdown para evitar conflictos de modo oscuro */
 .markdown-body {
     box-sizing: border-box;
     margin: 0 auto;
     background-color: #ffffff !important;
     color: #1f2328 !important;
-    /* Texto oscuro de GitHub */
     text-align: left;
 }
 
-/* Aplicar estilos a elementos inyectados vía v-html */
 :deep(.markdown-body h1),
 :deep(.markdown-body h2) {
     border-bottom: 1px solid #d8dee4;
@@ -78,7 +114,7 @@ const output = computed(() => marked.parse(sharedData.value || ''))
 }
 
 :deep(.markdown-body code) {
-    background-color: #afb8c133;
+    /* background-color: #afb8c133; */
     border-radius: 6px;
     padding: 0.2em 0.4em;
 }
